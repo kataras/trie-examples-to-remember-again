@@ -7,14 +7,12 @@ import (
 )
 
 type trieNode struct {
-	// TODO: this cannot be work on a real envirnoment, maps in go are not the same when fetching from when inserted.
-	// add a field like: char rune, keep the "key" or change it to a "word", same behavior.
+	parent *trieNode
+
 	records map[rune]*trieNode
 
 	end bool
 	key string // if end == true then key is filled with the original value of the insertion's key.
-
-	depth int // the level of depth.
 
 	//
 	data string
@@ -47,6 +45,7 @@ func (tn *trieNode) addRecord(c rune, n *trieNode) {
 		tn.records = make(map[rune]*trieNode)
 	}
 
+	n.parent = tn
 	tn.records[c] = n
 }
 
@@ -102,23 +101,18 @@ func newTrie() *trie {
 func (tr *trie) insert(s string, data string) {
 	input := []rune(s)
 	n := tr.root
-	depth := n.depth
+
 	for _, c := range input {
 		if !n.hasRecord(c) {
 			child := newTrieNode()
-			// child.depth = n.depth + 1
 			n.addRecord(c, child)
 		}
 		n = n.getRecord(c)
-		if n.depth > depth {
-			depth = n.depth
-		}
 	}
 
 	n.data = data
 	n.key = s
 	n.end = true
-	n.depth = depth + 1
 }
 
 func (tr *trie) searchPrefix(s string) *trieNode {
@@ -174,6 +168,7 @@ func main() {
 		"/firstt":               "firstt_data",
 		"/second":               "second_data",
 		"/second/one":           "second/one_data",
+		"/second/one/two":       "second/one/two_data",
 		"/second/one/two/three": "second/one/two/three_data",
 	}
 
@@ -205,12 +200,44 @@ func main() {
 		panic(fmt.Sprintf("[3] expected to has found"))
 	}
 
-	keyStartsWith1 := tree.autocomplete("/first", true)
+	keyToTest := "/firs"
+	describe("autocomplete of \"%s\"", keyToTest)
+
+	keyStartsWith1 := tree.autocomplete(keyToTest, true)
 	for _, s := range keyStartsWith1 {
 		fmt.Println(s)
 	}
 
-	nodeDepthCase := "/first/one"
-	n := tree.search(nodeDepthCase)
-	fmt.Printf("depends on the insert order, which makes us to change the records from map[rune]*trieNode to a list of []*trieNode.char\ndepth level of %s is: %d\n", nodeDepthCase, n.depth)
+	keyToTest = "/second/one/two/three"
+	describe("find final parents of \"%s\"", keyToTest)
+
+	n := tree.search(keyToTest).parent
+	for {
+		if n == nil {
+			break
+		}
+
+		if n.isEnd() {
+			fmt.Println(n.key)
+		}
+
+		n = n.parent
+	}
+
 }
+
+func describe(title string, args ...interface{}) {
+	fmt.Printf("🌀  %s ⤵️\n", fmt.Sprintf(title, args...))
+}
+
+/*
+	🌀  autocomplete of "/firs" ⤵️
+	/first
+	/firstt
+	/first/one
+	/first/one/two
+	🌀  find final parents of "/second/one/two/three" ⤵️
+	/second/one/two
+	/second/one
+	/second
+*/
