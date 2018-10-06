@@ -12,7 +12,8 @@ type trieNode struct {
 	children         map[string]*trieNode
 	segment          string // the part of the node path without the slash.
 	isNamedParameter bool   // is segment a named parameter?
-	paramKey         string // does one of the children contains a parameter name and if so then which key does its node belongs to, starts with the ':'?
+	isWildcard       bool   // allow everything else based on a wildcard named parameter.
+	paramKey         string // does one of the children contains a parameter name and if so then which key does its node belongs to, starts with the ':' or '*'?
 
 	end bool   // it is a complete node, here we stop and we can say that the node is valid.
 	key string // if end == true then key is filled with the original value of the insertion's key.
@@ -105,14 +106,21 @@ const pathSep = "/"
 
 func (tr *trie) insert(key string, data string) {
 	input := strings.Split(key, pathSep)[1:]
+	// input := strings.FieldsFunc(key, func(r rune) bool {
+	// 	return r == '/'
+	// })
 	n := tr.root
 
 	for _, s := range input {
 		if !n.hasChild(s) {
 			child := newTrieNode()
-			if s[0] == ':' {
+			if c := s[0]; c == ':' {
 				n.paramKey = s
 				child.isNamedParameter = true
+			} else if c == '*' {
+				n.paramKey = s
+				// or on the parent 'n'?
+				child.isWildcard = true
 			}
 			n.addChild(s, child)
 		}
@@ -150,21 +158,43 @@ func (tr *trie) search(s string) *trieNode {
 }
 
 func (tr *trie) searchAgainst(q string) *trieNode {
-	input := strings.Split(q, pathSep)[1:]
-
 	n := tr.root
-	for i := 0; i < len(input); i++ {
-		s := input[i]
-		if child := n.getChild(s); child != nil {
-			n = child
+
+	start := 1
+	i := 1
+	for { /* add a break instead; // i < len(q) */
+		c := q[i]
+		if c == '/' {
+			// word = q[start:i]
+			// println("c == /: " + word)
+			if child := n.getChild(q[start:i]); child != nil {
+				n = child
+			} else {
+				if n.paramKey != "" {
+					n = n.getChild(n.paramKey)
+				}
+			}
+
+			i++
+			start = i
 			continue
 		}
 
-		if n.paramKey != "" {
-			n = n.getChild(n.paramKey)
-			// if n.isNamedParameter {
-			// 	println(n.segment + " is named parameter")
-			// }
+		i++
+
+		// if end and no slash...
+		if i == len(q) {
+			// word = q[start:]
+			// println("i == len(q): " + word)
+			if child := n.getChild(q[start:]); child != nil {
+				n = child
+			} else {
+				if n.paramKey != "" {
+					n = n.getChild(n.paramKey)
+				}
+			}
+
+			break
 		}
 	}
 
@@ -212,6 +242,10 @@ func main() {
 		"/first/one/with/:param/static/:otherparam":              "first/one/with/static/_data_otherparam",
 		"/first/one/with/:param/:otherparam/:otherparam2":        "first/one/with/static/_data_otherparams",
 		"/first/one/with/:param/:otherparam/:otherparam2/static": "first/one/with/static/_data_otherparams_with_static_end",
+		// no wildcard but same prefix.
+		"/second/wild/nowild": "second/no_wild",
+		// wildcard named parameters.
+		"/second/wild/*mywildcardparam": "second/wildcard_1",
 	}
 
 	for s, data := range tests {
@@ -295,6 +329,22 @@ func main() {
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.data)
 	}
+
+	keyToTest = "/second/wild/everything/else/can/go/here"
+	describe("search all nodes against \"%s\"", keyToTest)
+	if n = tree.searchAgainst(keyToTest); n == nil {
+		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/second/wild/*mywildcardparam"))
+	} else {
+		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+	}
+
+	keyToTest = "/second/wild/static"
+	describe("search all nodes against \"%s\"", keyToTest)
+	if n = tree.searchAgainst(keyToTest); n == nil {
+		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, keyToTest))
+	} else {
+		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+	}
 }
 
 func describe(title string, args ...interface{}) {
@@ -307,8 +357,8 @@ func describe(title string, args ...interface{}) {
 	/first/one
 	/first/one/two
 	/first/one/with/:param
-	/first/one/with/:param/static/:otherparam
 	/first/one/with/:param/:otherparam/:otherparam2
+	/first/one/with/:param/static/:otherparam
 	/first/one/with/:param/:otherparam/:otherparam2/static
 	🌀  find final parents of "/second/one/two/three" ⤵️
 	/second/one/two
@@ -322,4 +372,8 @@ func describe(title string, args ...interface{}) {
 	found: '/first/one/with/:param/:otherparam/:otherparam2': first/one/with/static/_data_otherparams
 	🌀  search all nodes against "/first/one/with/myparameter1/myparameter2/myparameter3/static" ⤵️
 	found: '/first/one/with/:param/:otherparam/:otherparam2/static': first/one/with/static/_data_otherparams_with_static_end
+	🌀  search all nodes against "/second/wild/everything/else/can/go/here" ⤵️
+	found: '/second/wild/*mywildcardparam': second/wildcard_1
+	🌀  search all nodes against "/second/wild/static" ⤵️
+	found: '/second/wild/*mywildcardparam': second/wildcard_1 <- THIS SHOULD BE FIXED.
 */
