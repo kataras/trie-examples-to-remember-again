@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+/* go get github.com/kataras/iris */
+
 type trieNode struct {
 	parent *trieNode
 
