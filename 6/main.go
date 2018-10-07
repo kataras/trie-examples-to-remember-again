@@ -162,10 +162,10 @@ func (tr *trie) searchAgainst(q string) *trieNode {
 
 	start := 1
 	i := 1
-	for { /* add a break instead; // i < len(q) */
+	for {
 		c := q[i]
 		if c == '/' {
-			// word = q[start:i]
+			// word := q[start:i]
 			// println("c == /: " + word)
 			if child := n.getChild(q[start:i]); child != nil {
 				n = child
@@ -184,7 +184,7 @@ func (tr *trie) searchAgainst(q string) *trieNode {
 
 		// if end and no slash...
 		if i == len(q) {
-			// word = q[start:]
+			// word := q[start:]
 			// println("i == len(q): " + word)
 			if child := n.getChild(q[start:]); child != nil {
 				n = child
@@ -242,10 +242,12 @@ func main() {
 		"/first/one/with/:param/static/:otherparam":              "first/one/with/static/_data_otherparam",
 		"/first/one/with/:param/:otherparam/:otherparam2":        "first/one/with/static/_data_otherparams",
 		"/first/one/with/:param/:otherparam/:otherparam2/static": "first/one/with/static/_data_otherparams_with_static_end",
-		// no wildcard but same prefix.
-		"/second/wild/nowild": "second/no_wild",
 		// wildcard named parameters.
 		"/second/wild/*mywildcardparam": "second/wildcard_1",
+		// no wildcard but same prefix.
+		"/second/wild/static": "second/no_wild",
+		// no wildcard, parameter instead with same prefix.
+		"/sectond/wild/:param": "second/no_wild_but_param",
 	}
 
 	for s, data := range tests {
@@ -345,6 +347,14 @@ func main() {
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.data)
 	}
+
+	keyToTest = "/sectond/wild/parameter1"
+	describe("search all nodes against \"%s\"", keyToTest)
+	if n = tree.searchAgainst(keyToTest); n == nil {
+		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/sectond/wild/:param"))
+	} else {
+		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+	}
 }
 
 func describe(title string, args ...interface{}) {
@@ -375,5 +385,7 @@ func describe(title string, args ...interface{}) {
 	🌀  search all nodes against "/second/wild/everything/else/can/go/here" ⤵️
 	found: '/second/wild/*mywildcardparam': second/wildcard_1
 	🌀  search all nodes against "/second/wild/static" ⤵️
-	found: '/second/wild/*mywildcardparam': second/wildcard_1 <- THIS SHOULD BE FIXED.
+	found: '/second/wild/static': second/no_wild
+	🌀  search all nodes against "/sectond/wild/parameter1" ⤵️
+	found: '/sectond/wild/:param': second/no_wild_but_param
 */
