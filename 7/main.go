@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/kataras/iris/context"
 )
 
 /* go get github.com/kataras/iris */
@@ -15,12 +17,17 @@ type trieNode struct {
 	segment          string // the part of the node path without the slash.
 	isNamedParameter bool   // is segment a named parameter?
 	isWildcard       bool   // allow everything else after that path prefix but it checks for static paths and named parameters before that in order to support everything that other implementations do not.
-	paramKey         string // does one of the children contains a parameter name and if so then which key does its node belongs to, starts with ':' or '*'?
+	// paramKey         string // does one of the children contains a parameter name and if so then which key does its node belongs to, starts with ':' or '*'?
 
+	// paramKeys []string
+	paramKeys map[int]string
+
+	// on insert.
 	end bool   // it is a complete node, here we stop and we can say that the node is valid.
 	key string // if end == true then key is filled with the original value of the insertion's key.
-	//
-	data string // any data here, on the future the Route or each handlers will be sticked.
+	// insert data.
+	Handlers  context.Handlers
+	RouteName string
 }
 
 func newTrieNode() *trieNode {
@@ -102,21 +109,40 @@ func newTrie() *trie {
 
 const pathSep = "/"
 
-func (tr *trie) insert(key string, data string) {
-	input := strings.Split(key, pathSep)[1:]
+const dynamicPseudoPath = ">param"
+
+func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
+	input := strings.Split(path, pathSep)[1:]
 	// input := strings.FieldsFunc(key, func(r rune) bool {
 	// 	return r == '/'
 	// })
 	n := tr.root
 
-	for _, s := range input {
+	for i, s := range input {
+		// if c := s[0]; c == ':' || c == '*' {
+		// 	if !n.hasChild(dynamicPseudoPath) {
+		// 		child := newTrieNode()
+		// 		child.segment = s
+		// 		paramKeys = append(paramKeys, s)
+		// 		n.addChild(dynamicPseudoPath, child)
+		// 	}
+		// 	n = n.getChild(dynamicPseudoPath) //.addChild(s, newTrieNode())
+
+		// 	continue
+		// }
 		if !n.hasChild(s) {
 			child := newTrieNode()
 			if c := s[0]; c == ':' {
-				n.paramKey = s
+				if n.paramKeys == nil {
+					n.paramKeys = make(map[int]string)
+				}
+				n.paramKeys[i] = s
 				child.isNamedParameter = true
 			} else if c == '*' {
-				n.paramKey = s
+				if n.paramKeys == nil {
+					n.paramKeys = make(map[int]string)
+				}
+				n.paramKeys[i] = s
 				// or on the parent 'n'?
 				child.isWildcard = true
 			}
@@ -125,8 +151,9 @@ func (tr *trie) insert(key string, data string) {
 		n = n.getChild(s)
 	}
 
-	n.data = data
-	n.key = key
+	n.RouteName = routeName
+	n.Handlers = handlers
+	n.key = path
 	n.end = true
 }
 
@@ -155,26 +182,38 @@ func (tr *trie) search(s string) *trieNode {
 	return nil
 }
 
-func (tr *trie) searchAgainst(q string) *trieNode {
+func (tr *trie) searchAgainst(q string, params *context.RequestParams) *trieNode {
 	n := tr.root
 
 	start := 1
 	i := 1
+	pathCount := 0
 	for n != nil {
 		c := q[i]
 		if c == '/' {
 			// word := q[start:i]
-			// println("c == /: " + word)
+			// ("c == /: " + word)
 			if child := n.getChild(q[start:i]); child != nil {
 				n = child
 			} else {
-				if n.paramKey != "" {
-					n = n.getChild(n.paramKey)
+				if paramKey, ok := n.paramKeys[pathCount]; ok {
+					n = n.getChild(paramKey)
+					if n.isWildcard {
+						// println("wildcard: " + paramKey[1:] + " = " + q[start:])
+						params.Set(paramKey[1:], q[start:])
+
+						break
+					} else {
+						// println(paramKey[1:] + " = " + q[start:i])
+						params.Set(paramKey[1:], q[start:i])
+					}
+					// 	n = n.getChild(paramKey)
 				}
 			}
 
 			i++
 			start = i
+			pathCount++
 			continue
 		}
 
@@ -187,8 +226,10 @@ func (tr *trie) searchAgainst(q string) *trieNode {
 			if child := n.getChild(q[start:]); child != nil {
 				n = child
 			} else {
-				if n.paramKey != "" {
-					n = n.getChild(n.paramKey)
+				if paramKey, ok := n.paramKeys[pathCount]; ok {
+					// println("ending... " + paramKey[1:] + " = " + q[start:])
+					params.Set(paramKey[1:], q[start:])
+					n = n.getChild(paramKey)
 				}
 			}
 
@@ -205,14 +246,6 @@ func (tr *trie) searchAgainst(q string) *trieNode {
 
 func (tr *trie) hasPrefix(s string) bool {
 	return tr.searchPrefix(s) != nil
-}
-
-func (tr *trie) get(s string) string {
-	if n := tr.search(s); n != nil {
-		return n.data
-	}
-
-	return ""
 }
 
 func (tr *trie) autocomplete(s string, sorted bool) (list []string) {
@@ -236,10 +269,10 @@ func main() {
 		"/second/one/two/three": "second/one/two/three_data",
 
 		// named parameters.
-		"/first/one/with/:param":                                 "first/one/with_data_param",
-		"/first/one/with/:param/static/:otherparam":              "first/one/with/static/_data_otherparam",
-		"/first/one/with/:param/:otherparam/:otherparam2":        "first/one/with/static/_data_otherparams",
-		"/first/one/with/:param/:otherparam/:otherparam2/static": "first/one/with/static/_data_otherparams_with_static_end",
+		"/first/one/with/:param":                         "first/one/with_data_param",
+		"/first/one/with/:param/static/:otherparam":      "first/one/with/static/_data_otherparam",
+		"/first/one/with/:param1/:param2/:param3":        "first/one/with/with_data_threeparams",
+		"/first/one/with/:param1/:param2/:param3/static": "first/one/with/static/_data_otherparams_with_static_end",
 		// wildcard named parameters.
 		"/second/wild/*mywildcardparam": "second/wildcard_1",
 		// no wildcard but same prefix.
@@ -250,15 +283,15 @@ func main() {
 		"/*anything": "root_wildcard",
 	}
 
-	for s, data := range tests {
-		tree.insert(s, data)
+	for s, routeName := range tests {
+		tree.insert(s, routeName, nil)
 
 		if n := tree.search(s); n == nil {
 			panic(fmt.Sprintf("expected %s to be found", s))
-		}
-
-		if expected, got := data, tree.get(s); expected != got {
-			panic(fmt.Sprintf("expected %s key to has data: '%s' but got: '%s'", s, expected, got))
+		} else {
+			if expected, got := routeName, n.RouteName; expected != got {
+				panic(fmt.Sprintf("expected %s key to has route name: '%s' but got: '%s'", s, expected, got))
+			}
 		}
 	}
 
@@ -300,69 +333,144 @@ func main() {
 		n = n.parent
 	}
 
+	// n := tree.root
+	params := new(context.RequestParams)
+
 	keyToTest = "/first/one/with/myparam"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
+
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+		paramName := "param"
+		if expected, got := "myparam", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/first/one/with/myparam1/static/myparam2"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param/static/:otherparam"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		paramName := "param"
+		if expected, got := "myparam1", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
+
+		paramName = "otherparam"
+		if expected, got := "myparam2", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/first/one/with/myparam1/myparam2/myparam3"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
-		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param/:otherparam/:otherparam2"))
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
+		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param1/:param2/:param3"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		paramName := "param1"
+		if expected, got := "myparam1", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
+
+		paramName = "param2"
+		if expected, got := "myparam2", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
+
+		paramName = "param3"
+		if expected, got := "myparam3", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/first/one/with/myparameter1/myparameter2/myparameter3/static"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
-		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param/:otherparam/:otherparam2/static"))
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
+		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param1/:param2/:param3/static"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		paramName := "param1"
+		if expected, got := "myparameter1", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
+
+		paramName = "param2"
+		if expected, got := "myparameter2", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
+
+		paramName = "param3"
+		if expected, got := "myparameter3", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/second/wild/everything/else/can/go/here"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/second/wild/*mywildcardparam"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		paramName := "mywildcardparam"
+		if expected, got := "everything/else/can/go/here", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/second/wild/static"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, keyToTest))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		if params.Len() > 0 {
+			panic("expected 0 parameters")
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/sectond/wild/parameter1"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/sectond/wild/:param"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		paramName := "param"
+		if expected, got := "parameter1", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 
 	keyToTest = "/something/here/to/match/root/wildcard"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest); n == nil {
+	if n = tree.searchAgainst(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/*anything"))
 	} else {
-		fmt.Printf("found: '%s': %s\n", n.key, n.data)
+		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
+
+		paramName := "anything"
+		if expected, got := "something/here/to/match/root/wildcard", params.Get(paramName); expected != got {
+			panic(fmt.Sprintf("expected param: '%s' to be filled with value '%s' but got '%s' instead", paramName, expected, got))
+		}
 	}
+	params.Reset()
 }
 
 func describe(title string, args ...interface{}) {
