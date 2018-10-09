@@ -10,22 +10,21 @@ import (
 
 /* go get github.com/kataras/iris */
 
+const (
+	param    = ":" // is segment a named parameter?
+	wildcard = "*" // allow everything else after that path prefix but it checks for static paths and named parameters before that in order to support everything that other implementations do not.
+)
+
 type trieNode struct {
 	parent *trieNode
 
-	children         []*trieNode
-	segment          string // the part of the node path without the slash.
-	isNamedParameter bool   // is segment a named parameter?
-	isWildcard       bool   // allow everything else after that path prefix but it checks for static paths and named parameters before that in order to support everything that other implementations do not.
-	paramType        uint8  // does one of the children contains a parameter name and if so then which key does its node belongs to?
-	// paramKey         string // does one of the children contains a parameter name and if so then which key does its node belongs to, starts with ':' or '*'?
+	children       []*trieNode
+	segment        string // the part of the node path without the slash.
+	childParamType string // does one of the children contains a parameter name and if so then which key does its node belongs to?
+	paramKeys      []string
+	end            bool   // it is a complete node, here we stop and we can say that the node is valid.
+	key            string // if end == true then key is filled with the original value of the insertion's key.
 
-	paramKeys []string
-	// paramKeys map[int]string
-
-	// on insert.
-	end bool   // it is a complete node, here we stop and we can say that the node is valid.
-	key string // if end == true then key is filled with the original value of the insertion's key.
 	// insert data.
 	Handlers  context.Handlers
 	RouteName string
@@ -53,8 +52,6 @@ func (tn *trieNode) getChild(s string) *trieNode {
 func (tn *trieNode) addChild(s string, n *trieNode) {
 	for _, child := range tn.children {
 		if child.segment == s {
-			println("addChild: already found of node#segment: (it should be : or *) " + s)
-			// tn.children[i] = n
 			return
 		}
 	}
@@ -113,122 +110,26 @@ func newTrie() *trie {
 	}
 }
 
-func find(nodes []*trieNode, q string, paramValues []string) (*trieNode, []string) {
-	q = q[1:]
-	for _, n := range nodes {
-		println("looping through: q=" + q)
-
-		slashEnd := strings.IndexByte(q, '/')
-		if slashEnd == -1 {
-			break // continue
-		}
-
-		p := q[:slashEnd]
-		if n.segment == p {
-			return find(n.children, q[slashEnd:], paramValues)
-		}
-
-		// if strings.HasPrefix(q, n.segment) {
-		// 	// 	println(q[len(n.segment):])
-		// 	return n, append(paramValues, q[len(n.segment):])
-		// }
-
-		// if n.segment == ":" || n.segment == "*" {
-		// 	paramEnd := strings.IndexByte(q, '/')
-		// 	if paramEnd == -1 {
-		// 		if len(n.Handlers) == 0 {
-		// 			return nil, nil
-		// 		}
-		// 		if n.isWildcard {
-		// 			return n, append(paramValues, q)
-		// 		}
-		// 	}
-		// 	return find(n.children, q[paramEnd+1:], append(paramValues, q[:paramEnd]))
-		// }
-
-		// if n.isWildcard {
-		// 	return n, append(paramValues, q[1:])
-		// }
-
-		// child, childParamValues := find(n.children, q[len(n.segment):], paramValues)
-
-		// if child == nil || !child.isEnd() {
-		// 	if n.segment[len(n.segment)-1] == '/' {
-		// 		if len(n.Handlers) == 0 {
-		// 			return nil, nil
-		// 		}
-
-		// 		return n, append(paramValues, q[len(n.segment):])
-		// 	}
-
-		// 	continue
-		// }
-
-		// return child, childParamValues
-	}
-
-	return nil, nil
-}
-
 const pathSep = "/"
+const pathSepB = '/'
 
 func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 	input := strings.Split(path, pathSep)[1:]
-	// input := strings.FieldsFunc(key, func(r rune) bool {
-	// 	return r == '/'
-	// })
+
 	n := tr.root
-
 	var paramKeys []string
+
 	for _, s := range input {
-		// if c := s[0]; c == ':' || c == '*' {
-		// 	if !n.hasChild(dynamicPseudoPath) {
-		// 		child := newTrieNode()
-		// 		child.segment = s
-		// 		paramKeys = append(paramKeys, s)
-		// 		n.addChild(dynamicPseudoPath, child)
-		// 	}
-		// 	n = n.getChild(dynamicPseudoPath) //.addChild(s, newTrieNode())
-
-		// 	continue
-		// }
-
 		if !n.hasChild(s) {
 			child := newTrieNode()
-			if c := s[0]; c == ':' || c == '*' {
-				paramKeys = append(paramKeys, s)
-
-				child.isNamedParameter = c == ':'
-				child.isWildcard = c == '*'
-				// if dchild := n.getChild(string(c)); dchild != nil {
-				// 	n = dchild
-				// 	continue
-				// }
-				if child.isNamedParameter {
-					n.paramType = 1
-					s = ":"
-				} else {
-					n.paramType = 2
-					s = "*"
-				}
+			if cs := string(s[0]); cs == param || cs == wildcard {
+				n.childParamType = cs
+				paramKeys = append(paramKeys, s[1:]) // without : or *.
+				s = cs
 			}
-
-			// if c := s[0]; c == ':' {
-			// 	if n.paramKeys == nil {
-			// 		n.paramKeys = make(map[int]string)
-			// 	}
-			// 	n.paramKeys[i] = s
-			// 	child.isNamedParameter = true
-			// } else if c == '*' {
-			// 	if n.paramKeys == nil {
-			// 		n.paramKeys = make(map[int]string)
-			// 	}
-			// 	n.paramKeys[i] = s
-			// 	// or on the parent 'n'?
-			// 	child.isWildcard = true
-			// }
 			n.addChild(s, child)
 		}
+
 		n = n.getChild(s)
 	}
 
@@ -237,7 +138,6 @@ func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 	n.paramKeys = paramKeys
 	n.key = path
 	n.end = true
-
 }
 
 func (tr *trie) searchPrefix(prefix string) *trieNode {
@@ -257,131 +157,53 @@ func (tr *trie) searchPrefix(prefix string) *trieNode {
 	return n
 }
 
-func (tr *trie) search(s string) *trieNode {
-	if n := tr.searchPrefix(s); n != nil && n.end {
-		return n
-	}
-
-	return nil
-}
-
-func (tr *trie) searchAgainst(q string, params *context.RequestParams) *trieNode {
-	// n, paramValues := find(tr.root.children, q, nil)
-	// if n == nil || !n.isEnd() {
-	// 	return nil
-	// }
-
-	// if len(paramValues) > 0 {
-	// 	for i, paramKey := range n.paramKeys {
-	// 		params.Set(paramKey, paramValues[i])
-	// 	}
-
-	// 	println("all param values found: ")
-	// 	for _, p := range paramValues {
-	// 		println(p)
-	// 	}
-	// 	// if len(paramValues) > len(n.paramKeys) {
-	// 	// 	params.Set(n.paramKeys[len(n.paramKeys)-1], paramValues[len(paramValues)-1])
-	// 	// }
-	// }
-
-	// return n
-
+func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 	n := tr.root
+
 	start := 1
 	i := 1
-	pathCount := 0
 	var paramValues []string
+
 	for n != nil {
 		c := q[i]
-		if c == '/' {
-			word := q[start:i]
-			println("c == /: " + word)
+		if c == pathSepB {
 			if child := n.getChild(q[start:i]); child != nil {
 				n = child
-			} else {
-				if n.paramType == 1 {
-					n = n.getChild(":")
+			} else if n.childParamType != "" {
+				n = n.getChild(n.childParamType)
+				if n.segment == param {
 					paramValues = append(paramValues, q[start:i])
-				} else if n.paramType == 2 {
-					n = n.getChild("*")
+				} else if n.segment == wildcard {
 					paramValues = append(paramValues, q[start:])
 					break
+				} else {
+					return nil
 				}
 			}
 
-			// if child := n.getChild(q[start:i]); child == nil {
-			// 	if paramKey, ok := n.paramKeys[pathCount]; ok {
-			// 		n = n.getChild(paramKey)
-			// 		if n.isWildcard {
-			// 			// println("wildcard: " + paramKey[1:] + " = " + q[start:])
-			// 			params.Set(paramKey[1:], q[start:])
-
-			// 			break
-			// 		} else {
-			// 			// println(paramKey[1:] + " = " + q[start:i])
-			// 			params.Set(paramKey[1:], q[start:i])
-			// 		}
-			// 	} else {
-			// 		return nil
-			// 	}
-			// } else {
-			// 	n = child
-			// }
-
 			i++
 			start = i
-			pathCount++
 			continue
 		}
 
 		i++
 		// if end and no slash...
 		if i == len(q) {
-			word := q[start:]
-			println("c == /: " + word)
 			if child := n.getChild(q[start:]); child != nil {
 				n = child
-			} else {
-				if n.paramType == 1 {
-					n = n.getChild(":")
+			} else if n.childParamType != "" {
+				n = n.getChild(n.childParamType)
+				if n.segment == param {
 					paramValues = append(paramValues, q[start:])
-				} else if n.paramType == 2 {
-					n = n.getChild("*")
+				} else if n.segment == wildcard {
 					paramValues = append(paramValues, q[start:])
 					break
+				} else {
+					return nil
 				}
 			}
 			break
 		}
-		// if end and no slash...
-		// if i == len(q) {
-		// 	// word := q[start:]
-		// 	// println("i == len(q): " + word)
-		// 	// if child := n.getChild(q[start:]); child != nil {
-		// 	// 	n = child
-		// 	// } else {
-		// 	// 	if paramKey, ok := n.paramKeys[pathCount]; ok {
-		// 	// 		// println("ending... " + paramKey[1:] + " = " + q[start:])
-		// 	// 		params.Set(paramKey[1:], q[start:])
-		// 	// 		n = n.getChild(paramKey)
-		// 	// 	}
-		// 	// }
-
-		// 	if child := n.getChild(q[start:]); child == nil {
-		// 		if paramKey, ok := n.paramKeys[pathCount]; ok {
-		// 			n = n.getChild(paramKey)
-		// 			// println(paramKey[1:] + " = " + q[start:i])
-		// 			params.Set(paramKey[1:], q[start:i])
-		// 		} else {
-		// 			return nil
-		// 		}
-		// 	} else {
-		// 		n = child
-		// 	}
-
-		// 	break
-		// }
 	}
 
 	if n == nil || !n.isEnd() {
@@ -389,23 +211,11 @@ func (tr *trie) searchAgainst(q string, params *context.RequestParams) *trieNode
 	}
 
 	for i, paramValue := range paramValues {
-		println(n.paramKeys[i][1:] + " = " + paramValue)
 		if len(n.paramKeys) > i {
-			params.Set(n.paramKeys[i][1:], paramValue)
-		} else if i > len(n.paramKeys) {
-			println("THIS SHOULD NEVER HAPPEN BECAUSE WE ALREADY SET ONE PARAM VALUE TO ALL OF IT BUT:\nwildcard: " + n.paramKeys[len(n.paramKeys)-1][1:] + " = " + strings.Join(paramValues[i:], "/"))
-			params.Set(n.paramKeys[len(n.paramKeys)-1][1:], strings.Join(paramValues[i:], "/"))
+			params.Set(n.paramKeys[i], paramValue)
 		}
 	}
-	// if len(paramValues) == len(n.paramKeys) {
-	// 	// normal parameters.
-	// 	for i, paramKey := range n.paramKeys {
-	// 		params.Set(paramKey, paramValues[i])
-	// 	}
-	// }else if len(paramValues)  > len(n.paramKeys) {
-	// 	// wildcard.
 
-	// }
 	return n
 }
 
@@ -423,30 +233,6 @@ func (tr *trie) autocomplete(s string, sorted bool) (list []string) {
 
 func main() {
 	tree := newTrie()
-	// tests := map[string]string{
-	// 	"/first":                "first_data",
-	// 	"/first/one":            "first/one_data",
-	// 	"/first/one/two":        "first/one/two_data",
-	// 	"/firstt":               "firstt_data",
-	// 	"/second":               "second_data",
-	// 	"/second/one":           "second/one_data",
-	// 	"/second/one/two":       "second/one/two_data",
-	// 	"/second/one/two/three": "second/one/two/three_data",
-
-	// 	// named parameters.
-	// 	"/first/one/with/:param":                         "first/one/with_data_param",
-	// 	"/first/one/with/:param/static/:otherparam":      "first/one/with/static/_data_otherparam",
-	// 	"/first/one/with/:param1/:param2/:param3":        "first/one/with/with_data_threeparams",
-	// 	"/first/one/with/:param1/:param2/:param3/static": "first/one/with/static/_data_otherparams_with_static_end",
-	// 	// wildcard named parameters.
-	// 	"/second/wild/*mywildcardparam": "second/wildcard_1",
-	// 	// no wildcard but same prefix.
-	// 	"/second/wild/static": "second/no_wild",
-	// 	// no wildcard, parameter instead with same prefix.
-	// 	"/sectond/wild/:param": "second/no_wild_but_param",
-	// 	// root wildcard.
-	// 	"/*anything": "root_wildcard",
-	// }
 
 	tests := []struct {
 		Path      string
@@ -514,7 +300,7 @@ func main() {
 
 	keyToTest = "/second/one/two/three"
 	describe("find final parents of \"%s\"", keyToTest)
-	n := tree.search(keyToTest).parent
+	n := tree.searchPrefix(keyToTest).parent
 	for {
 		if n == nil {
 			break
@@ -533,7 +319,7 @@ func main() {
 	keyToTest = "/first/one/with/myparam"
 	describe("search all nodes against \"%s\"", keyToTest)
 
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -546,7 +332,7 @@ func main() {
 
 	keyToTest = "/first/one/with/myparam1/static/myparam2"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param/static/:otherparam"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -565,7 +351,7 @@ func main() {
 
 	keyToTest = "/first/one/with/myparam1/myparam2/myparam3"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param1/:param2/:param3"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -589,7 +375,7 @@ func main() {
 
 	keyToTest = "/first/one/with/myparameter1/myparameter2/myparameter3/static"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/first/one/with/:param1/:param2/:param3/static"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -613,7 +399,7 @@ func main() {
 
 	keyToTest = "/second/wild/everything/else/can/go/here"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/second/wild/*mywildcardparam"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -627,7 +413,7 @@ func main() {
 
 	keyToTest = "/second/wild/static"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, keyToTest))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -640,7 +426,7 @@ func main() {
 
 	keyToTest = "/sectond/wild/parameter1"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/sectond/wild/:param"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
@@ -654,7 +440,7 @@ func main() {
 
 	keyToTest = "/something/here/to/match/root/wildcard"
 	describe("search all nodes against \"%s\"", keyToTest)
-	if n = tree.searchAgainst(keyToTest, params); n == nil {
+	if n = tree.search(keyToTest, params); n == nil {
 		panic(fmt.Sprintf("expected '%s' to be matched with: '%s' but nothing found\n", keyToTest, "/*anything"))
 	} else {
 		fmt.Printf("found: '%s': %s\n", n.key, n.RouteName)
