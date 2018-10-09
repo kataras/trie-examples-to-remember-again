@@ -110,8 +110,10 @@ func newTrie() *trie {
 	}
 }
 
-const pathSep = "/"
-const pathSepB = '/'
+const (
+	pathSep  = "/"
+	pathSepB = '/'
+)
 
 func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 	input := strings.Split(path, pathSep)[1:]
@@ -162,11 +164,11 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 
 	start := 1
 	i := 1
+	end := len(q)
 	var paramValues []string
 
 	for n != nil {
-		c := q[i]
-		if c == pathSepB {
+		if q[i] == pathSepB {
 			if child := n.getChild(q[start:i]); child != nil {
 				n = child
 			} else if n.childParamType != "" {
@@ -188,19 +190,12 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 
 		i++
 		// if end and no slash...
-		if i == len(q) {
+		if i == end {
 			if child := n.getChild(q[start:]); child != nil {
 				n = child
 			} else if n.childParamType != "" {
 				n = n.getChild(n.childParamType)
-				if n.segment == param {
-					paramValues = append(paramValues, q[start:])
-				} else if n.segment == wildcard {
-					paramValues = append(paramValues, q[start:])
-					break
-				} else {
-					return nil
-				}
+				paramValues = append(paramValues, q[start:])
 			}
 			break
 		}
