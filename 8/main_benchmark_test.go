@@ -87,7 +87,7 @@ func initTree(tree *trie) {
 	}
 }
 
-// BenchmarkTrieInsert and BenchmarkTrieSearch runs benchmarks against the trie implementation with slice of children.
+// BenchmarkTrieInsert and BenchmarkTrieSearch runs benchmarks against the trie implementation with map[string]*trieNode for children.
 
 // go test -run=XXX -v -bench=BenchmarkTrieInsert -count=3
 func BenchmarkTrieInsert(b *testing.B) {
@@ -121,5 +121,4 @@ func BenchmarkTrieSearch(b *testing.B) {
 			}
 		}
 	}
-
 }
