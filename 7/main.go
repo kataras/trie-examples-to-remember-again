@@ -18,12 +18,14 @@ const (
 type trieNode struct {
 	parent *trieNode
 
-	children       []*trieNode
-	segment        string // the part of the node path without the slash.
-	childParamType string // does one of the children contains a parameter name and if so then which key does its node belongs to?
-	paramKeys      []string
-	end            bool   // it is a complete node, here we stop and we can say that the node is valid.
-	key            string // if end == true then key is filled with the original value of the insertion's key.
+	children               []*trieNode
+	segment                string // the part of the node path without the slash.
+	hasDynamicChild        bool
+	childNamedParameter    bool // does one of the children contains a parameter name and if so then which key does its node belongs to?
+	childWildcardParameter bool
+	paramKeys              []string
+	end                    bool   // it is a complete node, here we stop and we can say that the node is valid.
+	key                    string // if end == true then key is filled with the original value of the insertion's key.
 
 	// insert data.
 	Handlers  context.Handlers
@@ -122,13 +124,26 @@ func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 	var paramKeys []string
 
 	for _, s := range input {
+		c := s[0]
+
+		if isParam, isWildcard := c == param[0], c == wildcard[0]; isParam || isWildcard {
+			n.hasDynamicChild = true
+			paramKeys = append(paramKeys, s[1:]) // without : or *.
+
+			// if node has already a wildcard, don't force a value, check for true only.
+			if isParam {
+				n.childNamedParameter = true
+				s = param
+			}
+
+			if isWildcard {
+				n.childWildcardParameter = true
+				s = wildcard
+			}
+		}
+
 		if !n.hasChild(s) {
 			child := newTrieNode()
-			if cs := string(s[0]); cs == param || cs == wildcard {
-				n.childParamType = cs
-				paramKeys = append(paramKeys, s[1:]) // without : or *.
-				s = cs
-			}
 			n.addChild(s, child)
 		}
 
@@ -171,15 +186,22 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 		if q[i] == pathSepB {
 			if child := n.getChild(q[start:i]); child != nil {
 				n = child
-			} else if n.childParamType != "" {
-				n = n.getChild(n.childParamType)
-				if n.segment == param {
-					paramValues = append(paramValues, q[start:i])
-				} else if n.segment == wildcard {
-					paramValues = append(paramValues, q[start:])
-					break
-				} else {
-					return nil
+			} else {
+				if n.hasDynamicChild {
+					//  n.childWildcardParameter == false ->
+					// to fix something like:
+					//  /second/wild/:param
+					// /second/wild/*any
+					// it goes to the i == end and a wildcard cannot be registered like:
+					// /second/wild/*any/something, so this should work:
+					if n.childNamedParameter && n.childWildcardParameter == false {
+						n = n.getChild(param)
+						paramValues = append(paramValues, q[start:i])
+					} else if n.childWildcardParameter {
+						n = n.getChild(wildcard)
+						paramValues = append(paramValues, q[start:])
+						break
+					}
 				}
 			}
 
@@ -193,9 +215,16 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 		if i == end {
 			if child := n.getChild(q[start:]); child != nil {
 				n = child
-			} else if n.childParamType != "" {
-				n = n.getChild(n.childParamType)
-				paramValues = append(paramValues, q[start:])
+			} else {
+				if n.hasDynamicChild {
+					if n.childNamedParameter {
+						n = n.getChild(param)
+					} else if n.childWildcardParameter {
+						n = n.getChild(wildcard)
+					}
+
+					paramValues = append(paramValues, q[start:])
+				}
 			}
 			break
 		}

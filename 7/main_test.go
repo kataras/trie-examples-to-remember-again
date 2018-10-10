@@ -8,7 +8,7 @@ import (
 )
 
 func countParams(key string) int {
-	return strings.Count(key, param) + strings.Count(key, wildcard)
+	return strings.Count(key, param) + strings.Count(key, "*")
 }
 
 // BenchmarkTrie runs a benchmark against the trie implementation with slices of children.
@@ -26,79 +26,83 @@ func TestTrie(t *testing.T) {
 		routeName string
 		requests  []request
 	}{
-		{"/first", "first_data", []request{
+		{"/first", "first_data", []request{ // 0
 			{"/first", true, nil},
 		}},
-		{"/first/one", "first/one_data", []request{
+		{"/first/one", "first/one_data", []request{ // 1
 			{"/first/one", true, nil},
 		}},
-		{"/first/one/two", "first/one/two_data", []request{
+		{"/first/one/two", "first/one/two_data", []request{ // 2
 			{"/first/one/two", true, nil},
 		}},
-		{"/firstt", "firstt_data", []request{
+		{"/firstt", "firstt_data", []request{ // 3
 			{"/firstt", true, nil},
 		}},
-		{"/second", "second_data", []request{
+		{"/second", "second_data", []request{ // 4
 			{"/second", true, nil},
 		}},
-		{"/second/one", "second/one_data", []request{
+		{"/second/one", "second/one_data", []request{ // 5
 			{"/second/one", true, nil},
 		}},
-		{"/second/one/two", "second/one/two_data", []request{
+		{"/second/one/two", "second/one/two_data", []request{ // 6
 			{"/second/one/two", true, nil},
 		}},
-		{"/second/one/two/three", "second/one/two/three_data", []request{
+		{"/second/one/two/three", "second/one/two/three_data", []request{ // 7
 			{"/second/one/two/three", true, nil},
 		}},
 
 		// named parameters.
-		{"/first/one/with/:param1/:param2/:param3/static", "first/one/with/static/_data_otherparams_with_static_end", []request{
+		{"/first/one/with/:param1/:param2/:param3/static", "first/one/with/static/_data_otherparams_with_static_end", []request{ // 8
 			{"/first/one/with/myparam1/myparam2/myparam3/static", true, map[string]string{
 				"param1": "myparam1",
 				"param2": "myparam2",
 				"param3": "myparam3",
 			}},
 		}},
-		{"/first/one/with/:param1/:param2/:param3", "first/one/with/with_data_threeparams", []request{
+		{"/first/one/with/:param1/:param2/:param3", "first/one/with/with_data_threeparams", []request{ // 9
 			{"/first/one/with/myparam1/myparam2/myparam3", true, map[string]string{
 				"param1": "myparam1",
 				"param2": "myparam2",
 				"param3": "myparam3",
 			}},
 		}},
-		{"/first/one/with/:param/static/:otherparam", "first/one/with/static/_data_otherparam", []request{
+		{"/first/one/with/:param/static/:otherparam", "first/one/with/static/_data_otherparam", []request{ // 10
 			{"/first/one/with/myparam1/static/myotherparam", true, map[string]string{
 				"param":      "myparam1",
 				"otherparam": "myotherparam",
 			}},
 		}},
-		{"/first/one/with/:param", "first/one/with_data_param", []request{
+		{"/first/one/with/:param", "first/one/with_data_param", []request{ // 11
 			{"/first/one/with/singleparam", true, map[string]string{
 				"param": "singleparam",
 			}},
 		}},
 
 		// wildcard named parameters.
-		{"/second/wild/*wildcardparam", "second/wildcard_1", []request{
-			{"/second/wild/anything/can/be/stored/here", true, map[string]string{
-				"wildcardparam": "anything/can/be/stored/here",
-			}},
-			{"/second/wild/anything", true, map[string]string{
-				"wildcardparam": "anything",
+		{"/second/wild/*mywildcardparam", "second/wildcard_1", []request{ // 12
+			{"/second/wild/everything/else/can/go/here", true, map[string]string{
+				"mywildcardparam": "everything/else/can/go/here",
 			}},
 		}},
 		// no wildcard but same prefix.
-		{"/second/wild/static", "second/no_wild", []request{
+		{"/second/wild/static", "second/no_wild", []request{ // 13
 			{"/second/wild/static", true, nil},
 		}},
 		// no wildcard, parameter instead with same prefix.
-		{"/second/wild/:param", "second/no_wild_but_param", []request{
+		{"/second/wild/:param", "second/no_wild_but_param", []request{ // 14
 			{"/second/wild/myparam", true, map[string]string{
 				"param": "myparam",
 			}},
 		}},
+
+		// this is not possible ofc because of wildcard, we support param, wildcard and static
+		// in the same path but we don't have a way to check the next children of an unknnown segment,
+		// and for the best of all.
+		// {"/second/wild/:param/static", "second/with_param_and_static_should_fail", []request{ // 14
+		// 	{"/second/wild/myparam/static", false, nil},
+		// }},
 		// root wildcard.
-		{"/*anything", "root_wildcard", []request{
+		{"/*anything", "root_wildcard", []request{ // 15
 			{"/something/or/anything/can/be/stored/here", true, map[string]string{
 				"anything": "something/or/anything/can/be/stored/here",
 			}},
@@ -113,7 +117,7 @@ func TestTrie(t *testing.T) {
 	for idx, tt := range tests {
 		tree.insert(tt.key, tt.routeName, nil)
 		for reqIdx, req := range tt.requests {
-			if expected, got := countParams(tt.key), len(req.params); expected != got {
+			if expected, got := countParams(tt.key), len(req.params); req.found && expected != got {
 				t.Fatalf("before ran: [%d:%d]: registered parameters and expected parameters have not the same length, should be: %d but %d given", idx, reqIdx, expected, got)
 			}
 		}
@@ -128,11 +132,13 @@ func TestTrie(t *testing.T) {
 
 			if req.found {
 				if n == nil {
-					t.Fatalf("[%d:%d] expected node with key: %s and requested path: %s to be found", idx, reqIdx, tt.key, req.path)
+					t.Errorf("[%d:%d] expected node with key: %s and requested path: %s to be found", idx, reqIdx, tt.key, req.path)
+					continue
 				}
 
 				if !n.isEnd() {
-					t.Fatalf("[%d:%d] expected node with key: %s and requested path: %s to be found (with end == true)", idx, reqIdx, tt.key, req.path)
+					t.Errorf("[%d:%d] expected node with key: %s and requested path: %s to be found (with end == true)", idx, reqIdx, tt.key, req.path)
+					continue
 				}
 			}
 
