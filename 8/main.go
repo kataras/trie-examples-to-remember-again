@@ -102,6 +102,10 @@ func (tn *trieNode) String() string {
 
 type trie struct {
 	root *trieNode
+
+	// if true then it will handle any path if not other parent wildcard exists,
+	// so even 404 (on http services) is up to it, see trie#insert.
+	hasRootWildcard bool
 }
 
 func newTrie() *trie {
@@ -115,8 +119,16 @@ const (
 	pathSepB = '/'
 )
 
+func slowPathSplit(path string) []string {
+	if path == pathSep {
+		return []string{pathSep}
+	}
+
+	return strings.Split(path, pathSep)[1:]
+}
+
 func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
-	input := strings.Split(path, pathSep)[1:]
+	input := slowPathSplit(path)
 
 	n := tr.root
 	var paramKeys []string
@@ -137,6 +149,10 @@ func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 			if isWildcard {
 				n.childWildcardParameter = true
 				s = wildcard
+
+				if tr.root == n {
+					tr.hasRootWildcard = true
+				}
 			}
 		}
 
@@ -156,7 +172,7 @@ func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 }
 
 func (tr *trie) searchPrefix(prefix string) *trieNode {
-	input := strings.Split(prefix, pathSep)[1:]
+	input := slowPathSplit(prefix)
 	n := tr.root
 
 	for i := 0; i < len(input); i++ {
@@ -173,11 +189,14 @@ func (tr *trie) searchPrefix(prefix string) *trieNode {
 }
 
 func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
+	end := len(q)
 	n := tr.root
+	if end == 1 && q[0] == pathSepB {
+		return n.getChild(pathSep)
+	}
 
 	start := 1
 	i := 1
-	end := len(q)
 	var paramValues []string
 
 	for n != nil {
@@ -186,28 +205,31 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 				n = child
 			} else {
 				if n.hasDynamicChild {
-					//  n.childWildcardParameter == false ->
+					// n.childWildcardParameter == false ->
 					// to fix something like:
-					//  /second/wild/:param
+					// /second/wild/:param
 					// /second/wild/*any
 					// it goes to the i == end and a wildcard cannot be registered like:
 					// /second/wild/*any/something, so this should work:
 					if n.childNamedParameter && n.childWildcardParameter == false {
 						n = n.getChild(param)
-						if c, n := cap(paramValues), len(paramValues); c > n {
-							paramValues = paramValues[:n+1]
-							paramValues[n] = q[start:i]
+						if ln := len(paramValues); cap(paramValues) > ln {
+							paramValues = paramValues[:ln+1]
+							paramValues[ln] = q[start:i]
 						} else {
 							paramValues = append(paramValues, q[start:i])
 						}
 					} else if n.childWildcardParameter {
 						n = n.getChild(wildcard)
-						if c, n := cap(paramValues), len(paramValues); c > n {
-							paramValues = paramValues[:n+1]
-							paramValues[n] = q[start:]
+						if ln := len(paramValues); cap(paramValues) > ln {
+							paramValues = paramValues[:ln+1]
+							paramValues[ln] = q[start:]
 						} else {
 							paramValues = append(paramValues, q[start:])
 						}
+						break
+					} else {
+						n = nil // for root wildcard.
 						break
 					}
 				}
@@ -231,12 +253,15 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 						n = n.getChild(wildcard)
 					}
 
-					if c, n := cap(paramValues), len(paramValues); c > n {
-						paramValues = paramValues[:n+1]
-						paramValues[n] = q[start:]
+					if ln := len(paramValues); cap(paramValues) > ln {
+						paramValues = paramValues[:ln+1]
+						paramValues[ln] = q[start:]
 					} else {
 						paramValues = append(paramValues, q[start:])
 					}
+				} else {
+					n = nil // for root wildcard.
+					break
 				}
 			}
 			break
@@ -244,6 +269,14 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 	}
 
 	if n == nil || !n.isEnd() {
+		if tr.hasRootWildcard {
+			// note that something like:
+			// Routes: /other2/*myparam and /other2/static
+			// Reqs: /other2/staticed will be handled by the /other2/*myparam and not the root wildcard, which is what we want.
+			n = tr.root.getChild(wildcard)
+			params.Set(n.paramKeys[0], q[1:])
+			return n
+		}
 		return nil
 	}
 

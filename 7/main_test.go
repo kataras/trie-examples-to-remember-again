@@ -94,13 +94,6 @@ func TestTrie(t *testing.T) {
 				"param": "myparam",
 			}},
 		}},
-
-		// this is not possible ofc because of wildcard, we support param, wildcard and static
-		// in the same path but we don't have a way to check the next children of an unknnown segment,
-		// and for the best of all.
-		// {"/second/wild/:param/static", "second/with_param_and_static_should_fail", []request{ // 14
-		// 	{"/second/wild/myparam/static", false, nil},
-		// }},
 		// root wildcard.
 		{"/*anything", "root_wildcard", []request{ // 15
 			{"/something/or/anything/can/be/stored/here", true, map[string]string{
@@ -173,27 +166,3 @@ func TestTrie(t *testing.T) {
 		}
 	}
 }
-
-/*
-=== RUN   TestTrie
---- FAIL: TestTrie (0.00s)
-    main_test.go:145: [12:0] /second/wild/anything/can/be/stored/here:
-                expected found node's key to be equal with: '/second/wild/*wildcardparam' but got: '/second/wild/:param' instead
-    main_test.go:148: [/second/wild/:param:12:0] /second/wild/anything/can/be/stored/here:
-                expected RouteName to be equal with: 'second/no_wild_but_param' but got: 'second/wildcard_1' instead
-    main_test.go:159: [/second/wild/:param:12:0] /second/wild/anything/can/be/stored/here:
-                expected request param with key: 'wildcardparam' to be found
-    main_test.go:162: [/second/wild/:param:12:0] /second/wild/anything/can/be/stored/here:
-                expected request param with key: 'wildcardparam' to be equal with: 'anything/can/be/stored/here' but got: '' instead
-    main_test.go:145: [12:1] /second/wild/anything:
-                expected found node's key to be equal with: '/second/wild/*wildcardparam' but got: '/second/wild/:param' instead
-    main_test.go:148: [/second/wild/:param:12:1] /second/wild/anything:
-                expected RouteName to be equal with: 'second/no_wild_but_param' but got: 'second/wildcard_1' instead
-    main_test.go:159: [/second/wild/:param:12:1] /second/wild/anything:
-                expected request param with key: 'wildcardparam' to be found
-    main_test.go:162: [/second/wild/:param:12:1] /second/wild/anything:
-                expected request param with key: 'wildcardparam' to be equal with: 'anything' but got: '' instead
-FAIL
-exit status 1
-FAIL    github.com/kataras/trie-examples-to-remember-again/7    0.065s
-*/

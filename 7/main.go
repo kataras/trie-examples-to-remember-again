@@ -202,6 +202,8 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 						paramValues = append(paramValues, q[start:])
 						break
 					}
+				} else {
+					return nil
 				}
 			}
 
@@ -224,6 +226,8 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 					}
 
 					paramValues = append(paramValues, q[start:])
+				} else {
+					return nil
 				}
 			}
 			break
