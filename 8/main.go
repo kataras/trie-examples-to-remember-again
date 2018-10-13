@@ -289,6 +289,13 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 	}
 
 	if n == nil || !n.isEnd() {
+		if n != nil { // we need it on both places, on last segment (below) or on the first unnknown (above).
+			if n = n.findClosestParentWildcardNode(); n != nil {
+				params.Set(n.paramKeys[0], q[len(n.staticKey):])
+				return n
+			}
+		}
+
 		if tr.hasRootWildcard {
 			// that's the case for root wildcard, tests are passing
 			// even without it but stick with it for reference.
