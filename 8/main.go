@@ -19,12 +19,16 @@ type trieNode struct {
 	parent *trieNode
 
 	children               map[string]*trieNode
-	hasDynamicChild        bool
-	childNamedParameter    bool // does one of the children contains a parameter name and if so then which key does its node belongs to?
-	childWildcardParameter bool
-	paramKeys              []string
-	end                    bool   // it is a complete node, here we stop and we can say that the node is valid.
-	key                    string // if end == true then key is filled with the original value of the insertion's key.
+	hasDynamicChild        bool // does one of the children contains a parameter or wildcard?
+	childNamedParameter    bool // is the child a named parameter (single segmnet)
+	childWildcardParameter bool // or it is a wildcard (can be more than one path segments) ?
+
+	paramKeys []string // the param keys without : or *.
+	end       bool     // it is a complete node, here we stop and we can say that the node is valid.
+	key       string   // if end == true then key is filled with the original value of the insertion's key.
+	// if key != "" && its parent has childWildcardParameter == true,
+	// we need it to track the static part for the closest-wildcard's parameter storage.
+	staticKey string
 
 	// insert data.
 	Handlers  context.Handlers
@@ -59,6 +63,19 @@ func (tn *trieNode) addChild(s string, n *trieNode) {
 
 	n.parent = tn
 	tn.children[s] = n
+}
+
+func (tn *trieNode) findClosestParentWildcardNode() *trieNode {
+	tn = tn.parent
+	for tn != nil {
+		if tn.childWildcardParameter {
+			return tn.getChild(wildcard)
+		}
+
+		tn = tn.parent
+	}
+
+	return nil
 }
 
 func (tn *trieNode) isEnd() bool {
@@ -149,7 +166,6 @@ func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 			if isWildcard {
 				n.childWildcardParameter = true
 				s = wildcard
-
 				if tr.root == n {
 					tr.hasRootWildcard = true
 				}
@@ -169,6 +185,16 @@ func (tr *trie) insert(path, routeName string, handlers context.Handlers) {
 	n.paramKeys = paramKeys
 	n.key = path
 	n.end = true
+
+	i := strings.Index(path, param)
+	if i == -1 {
+		i = strings.Index(path, wildcard)
+	}
+	if i == -1 {
+		i = len(n.key)
+	}
+
+	n.staticKey = path[:i]
 }
 
 func (tr *trie) searchPrefix(prefix string) *trieNode {
@@ -199,40 +225,54 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 	i := 1
 	var paramValues []string
 
-	for n != nil {
-		if q[i] == pathSepB {
+	for {
+		if i == end || q[i] == pathSepB {
 			if child := n.getChild(q[start:i]); child != nil {
 				n = child
-			} else {
-				if n.hasDynamicChild {
-					// n.childWildcardParameter == false ->
-					// to fix something like:
-					// /second/wild/:param
-					// /second/wild/*any
-					// it goes to the i == end and a wildcard cannot be registered like:
-					// /second/wild/*any/something, so this should work:
-					if n.childNamedParameter && n.childWildcardParameter == false {
-						n = n.getChild(param)
-						if ln := len(paramValues); cap(paramValues) > ln {
-							paramValues = paramValues[:ln+1]
-							paramValues[ln] = q[start:i]
-						} else {
-							paramValues = append(paramValues, q[start:i])
-						}
-					} else if n.childWildcardParameter {
-						n = n.getChild(wildcard)
-						if ln := len(paramValues); cap(paramValues) > ln {
-							paramValues = paramValues[:ln+1]
-							paramValues[ln] = q[start:]
-						} else {
-							paramValues = append(paramValues, q[start:])
-						}
-						break
-					} else {
-						n = nil // for root wildcard.
-						break
-					}
+			} else if n.childNamedParameter { // && n.childWildcardParameter == false {
+				//	println("dynamic NAMED element for: " + q[start:i] + " found ")
+				n = n.getChild(param)
+				if ln := len(paramValues); cap(paramValues) > ln {
+					paramValues = paramValues[:ln+1]
+					paramValues[ln] = q[start:i]
+				} else {
+					paramValues = append(paramValues, q[start:i])
 				}
+			} else if n.childWildcardParameter {
+				//	println("dynamic WILDCARD element for: " + q[start:i] + " found ")
+				n = n.getChild(wildcard)
+				if ln := len(paramValues); cap(paramValues) > ln {
+					paramValues = paramValues[:ln+1]
+					paramValues[ln] = q[start:]
+				} else {
+					paramValues = append(paramValues, q[start:])
+				}
+				break
+			} else {
+				n = n.findClosestParentWildcardNode()
+				if n != nil {
+					// means that it has :param/static and *wildcard, we go trhough the :param
+					// but the next path segment is not the /static, so go back to *wildcard
+					// instead of not found.
+					//
+					// Fixes:
+					// /hello/*p
+					// /hello/:p1/static/:p2
+					// req: http://localhost:8080/hello/dsadsa/static/dsadsa => found
+					// req: http://localhost:8080/hello/dsadsa => but not found!
+					// and
+					// /second/wild/*p
+					// /second/wild/static/otherstatic/
+					// req: /second/wild/static/otherstatic/random => but not found!
+					params.Set(n.paramKeys[0], q[len(n.staticKey):])
+					return n
+				}
+
+				return nil
+			}
+
+			if i == end {
+				break
 			}
 
 			i++
@@ -241,42 +281,27 @@ func (tr *trie) search(q string, params *context.RequestParams) *trieNode {
 		}
 
 		i++
-		// if end and no slash...
-		if i == end {
-			if child := n.getChild(q[start:]); child != nil {
-				n = child
-			} else {
-				if n.hasDynamicChild {
-					if n.childNamedParameter {
-						n = n.getChild(param)
-					} else if n.childWildcardParameter {
-						n = n.getChild(wildcard)
-					}
 
-					if ln := len(paramValues); cap(paramValues) > ln {
-						paramValues = paramValues[:ln+1]
-						paramValues[ln] = q[start:]
-					} else {
-						paramValues = append(paramValues, q[start:])
-					}
-				} else {
-					n = nil // for root wildcard.
-					break
-				}
-			}
-			break
-		}
+		// if i == end {
+		// same...
+		// 	break
+		// }
 	}
 
 	if n == nil || !n.isEnd() {
 		if tr.hasRootWildcard {
-			// note that something like:
+			// that's the case for root wildcard, tests are passing
+			// even without it but stick with it for reference.
+			// Note ote that something like:
 			// Routes: /other2/*myparam and /other2/static
-			// Reqs: /other2/staticed will be handled by the /other2/*myparam and not the root wildcard, which is what we want.
+			// Reqs: /other2/staticed will be handled
+			// the /other2/*myparam and not the root wildcard, which is what we want.
+			//
 			n = tr.root.getChild(wildcard)
 			params.Set(n.paramKeys[0], q[1:])
 			return n
 		}
+
 		return nil
 	}
 

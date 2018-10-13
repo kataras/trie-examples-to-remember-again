@@ -11,9 +11,7 @@ func countParams(key string) int {
 	return strings.Count(key, param) + strings.Count(key, "*")
 }
 
-// BenchmarkTrie runs a benchmark against the trie implementation with slices of children.
-// TODO: same benchmark with different trie implementation vased on children with map[string]*trieNode instead (it should be even faster).
-func TestTrie(t *testing.T) {
+func testTrie(t *testing.T, oneByOne bool) {
 	// load.
 	type request struct {
 		path   string
@@ -83,6 +81,9 @@ func TestTrie(t *testing.T) {
 			{"/second/wild/everything/else/can/go/here", true, map[string]string{
 				"mywildcardparam": "everything/else/can/go/here",
 			}},
+			{"/second/wild/static/otherstatic/random", true, map[string]string{
+				"mywildcardparam": "static/otherstatic/random",
+			}},
 		}},
 		// no wildcard but same prefix.
 		{"/second/wild/static", "second/no_wild", []request{ // 13
@@ -94,13 +95,17 @@ func TestTrie(t *testing.T) {
 				"param": "myparam",
 			}},
 		}},
+		// even that is possible:
+		{"/second/wild/:param/static", "second/with_param_and_static_should_fail", []request{ // 14
+			{"/second/wild/myparam/static", true, map[string]string{
+				"param": "myparam",
+			}},
+		}},
 
-		// this is not possible ofc because of wildcard, we support param, wildcard and static
-		// in the same path but we don't have a way to check the next children of an unknown segment,
-		// and for the best of all.
-		// {"/second/wild/:param/static", "second/with_param_and_static_should_fail", []request{ // 14
-		// 	{"/second/wild/myparam/static", false, nil},
-		// }},
+		{"/second/wild/static/otherstatic", "second/no_wild_two_statics", []request{ // 14
+			{"/second/wild/static/otherstatic", true, nil},
+		}},
+
 		// root wildcard.
 		{"/*anything", "root_wildcard", []request{ // 15
 			{"/something/or/anything/can/be/stored/here", true, map[string]string{
@@ -109,20 +114,19 @@ func TestTrie(t *testing.T) {
 			{"/justsomething", true, map[string]string{
 				"anything": "justsomething",
 			}},
-			{"/second/wild/static/otherstatic/random", true, map[string]string{
-				"anything": "second/wild/static/otherstatic/random",
+			{"/a_not_found", true, map[string]string{
+				"anything": "a_not_found",
 			}},
-		}},
-
-		{"/second/wild/static/otherstatic", "second/no_wild_two_statics", []request{ // 14
-			{"/second/wild/static/otherstatic", true, nil},
 		}},
 	}
 
 	tree := newTrie()
 	// insert.
 	for idx, tt := range tests {
-		tree.insert(tt.key, tt.routeName, nil)
+		if !oneByOne {
+			tree.insert(tt.key, tt.routeName, nil)
+		}
+
 		for reqIdx, req := range tt.requests {
 			if expected, got := countParams(tt.key), len(req.params); req.found && expected != got {
 				t.Fatalf("before ran: [%d:%d]: registered parameters and expected parameters have not the same length, should be: %d but %d given", idx, reqIdx, expected, got)
@@ -132,6 +136,9 @@ func TestTrie(t *testing.T) {
 
 	// run.
 	for idx, tt := range tests {
+		if oneByOne {
+			tree.insert(tt.key, tt.routeName, nil)
+		}
 		params := new(context.RequestParams)
 		for reqIdx, req := range tt.requests {
 			params.Reset()
@@ -139,7 +146,7 @@ func TestTrie(t *testing.T) {
 
 			if req.found {
 				if n == nil {
-					t.Errorf("[%d:%d] expected node with key: %s and requested path: %s to be found", idx, reqIdx, tt.key, req.path)
+					t.Fatalf("[%d:%d] expected node with key: %s and requested path: %s to be found", idx, reqIdx, tt.key, req.path)
 					continue
 				}
 
@@ -155,7 +162,7 @@ func TestTrie(t *testing.T) {
 
 			if n != nil {
 				if expected, got := tt.key, n.key; expected != got {
-					t.Errorf("[%d:%d] %s:\n\texpected found node's key to be equal with: '%s' but got: '%s' instead", idx, reqIdx, req.path, expected, got)
+					t.Fatalf("[%d:%d] %s:\n\texpected found node's key to be equal with: '%s' but got: '%s' instead", idx, reqIdx, req.path, expected, got)
 				}
 				if expected, got := n.RouteName, tt.routeName; expected != got {
 					t.Errorf("[%s:%d:%d] %s:\n\texpected RouteName to be equal with: '%s' but got: '%s' instead", n.key, idx, reqIdx, req.path, expected, got)
@@ -179,4 +186,13 @@ func TestTrie(t *testing.T) {
 			}
 		}
 	}
+}
+
+// BenchmarkTrie runs a benchmark against the trie implementation with slices of children.
+// TODO: same benchmark with different trie implementation vased on children with map[string]*trieNode instead (it should be even faster).
+func TestTrie(t *testing.T) {
+	t.Logf("Test when all nodes are registered\n")
+	testTrie(t, false)
+	t.Logf("Test one node by one\n")
+	testTrie(t, true)
 }
