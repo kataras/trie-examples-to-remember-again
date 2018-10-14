@@ -29,7 +29,7 @@ type Node struct {
 	Data interface{}
 }
 
-func newNode() *Node {
+func NewNode() *Node {
 	n := new(Node)
 	return n
 }

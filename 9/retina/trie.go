@@ -20,34 +20,9 @@ type Trie struct {
 
 func NewTrie() *Trie {
 	return &Trie{
-		root:            newNode(),
+		root:            NewNode(),
 		hasRootWildcard: false,
 	}
-}
-
-const (
-	pathSep  = "/"
-	pathSepB = '/'
-)
-
-func slowPathSplit(path string) []string {
-	if path == pathSep {
-		return []string{pathSep}
-	}
-
-	return strings.Split(path, pathSep)[1:]
-}
-
-func resolveStaticPart(key string) string {
-	i := strings.Index(key, ParamStart)
-	if i == -1 {
-		i = strings.Index(key, WildcardParamStart)
-	}
-	if i == -1 {
-		i = len(key)
-	}
-
-	return key[:i]
 }
 
 type InsertOption func(*Node)
@@ -82,8 +57,38 @@ func (t *Trie) Insert(key string, options ...InsertOption) {
 	}
 }
 
-func (t *Trie) InsertRoute(path, routeName string, handler http.Handler) {
-	t.insert(path, routeName, nil, handler)
+func (t *Trie) InsertRoute(pattern, routeName string, handler http.Handler) {
+	t.insert(pattern, routeName, nil, handler)
+}
+
+const (
+	pathSep  = "/"
+	pathSepB = '/'
+)
+
+func slowPathSplit(path string) []string {
+	if path == pathSep {
+		return []string{pathSep}
+	}
+
+	// remove last sep if any.
+	if path[len(path)-1] == pathSepB {
+		path = path[:len(path)-1]
+	}
+
+	return strings.Split(path, pathSep)[1:]
+}
+
+func resolveStaticPart(key string) string {
+	i := strings.Index(key, ParamStart)
+	if i == -1 {
+		i = strings.Index(key, WildcardParamStart)
+	}
+	if i == -1 {
+		i = len(key)
+	}
+
+	return key[:i]
 }
 
 func (t *Trie) insert(key, tag string, optionalData interface{}, handler http.Handler) *Node {
@@ -115,7 +120,7 @@ func (t *Trie) insert(key, tag string, optionalData interface{}, handler http.Ha
 		}
 
 		if !n.hasChild(s) {
-			child := newNode()
+			child := NewNode()
 			n.addChild(s, child)
 		}
 
