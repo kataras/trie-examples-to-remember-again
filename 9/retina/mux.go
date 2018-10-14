@@ -107,20 +107,16 @@ func (m *Mux) Of(prefix string) SubMux {
 		prefix = prefix[0:strings.LastIndex(m.root, prefix)]
 	}
 
-	// if len(m.root) > 0 {
-	// 	if m.root[len(m.root)-1] == pathSepB && prefix[0] == pathSepB {
-	// 		prefix = prefix[1:]
-	// 	}
-	// }
-
-	// remove last "/", if any.
+	// remove last slash "/", if any.
 	if lidx := len(prefix) - 1; prefix[lidx] == pathSepB {
 		prefix = prefix[0:lidx]
 	}
 
+	// remove any duplication of slashes "/".
+	prefix = pathSep + strings.Trim(m.root+prefix, pathSep)
+
 	return &Mux{
 		Routes: m.Routes,
-		// remove any duplication of slashes "/".
-		root: pathSep + strings.Trim(m.root+prefix, pathSep),
+		root:   prefix,
 	}
 }
