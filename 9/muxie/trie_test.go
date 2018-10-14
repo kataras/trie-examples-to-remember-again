@@ -1,4 +1,4 @@
-package retina
+package muxie
 
 import (
 	"strings"
@@ -40,7 +40,6 @@ var tests = []struct {
 	{"/second/one/two/three", "second/one/two/three_data", []request{ // 7
 		{"/second/one/two/three", true, nil},
 	}},
-
 	// named parameters.
 	{"/first/one/with/:param1/:param2/:param3/static", "first/one/with/static/_data_otherparams_with_static_end", []request{ // 8
 		{"/first/one/with/myparam1/myparam2/myparam3/static", true, map[string]string{
@@ -67,8 +66,7 @@ var tests = []struct {
 			"param": "singleparam",
 		}},
 	}},
-
-	// wildcard named parameters.
+	// wildcard parameters.
 	{"/second/wild/*mywildcardparam", "second/wildcard_1", []request{ // 12
 		{"/second/wild/everything/else/can/go/here", true, map[string]string{
 			"mywildcardparam": "everything/else/can/go/here",
@@ -97,7 +95,6 @@ var tests = []struct {
 	{"/second/wild/static/otherstatic", "second/no_wild_two_statics", []request{ // 14
 		{"/second/wild/static/otherstatic", true, nil},
 	}},
-
 	// root wildcard.
 	{"/*anything", "root_wildcard", []request{ // 15
 		{"/something/or/anything/can/be/stored/here", true, map[string]string{

@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"github.com/kataras/iris/context"
-	"github.com/kataras/trie-examples-to-remember-again/9/retina"
+	"github.com/kataras/trie-examples-to-remember-again/9/muxie"
 )
 
 /* go get github.com/kataras/iris */
 
 func main() {
-	tree := retina.NewTrie()
+	tree := muxie.NewTrie()
 
 	tests := []struct {
 		Path      string
@@ -71,7 +71,7 @@ func main() {
 
 	keyToTest := "/first"
 	describe("autocomplete of \"%s\"", keyToTest)
-	keyStartsWith1 := tree.Autocomplete(keyToTest, retina.DefaultKeysSorter)
+	keyStartsWith1 := tree.Autocomplete(keyToTest, muxie.DefaultKeysSorter)
 	for _, s := range keyStartsWith1 {
 		fmt.Println(s)
 	}
